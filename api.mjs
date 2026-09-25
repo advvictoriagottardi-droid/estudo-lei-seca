@@ -1,4 +1,4 @@
-// Cadernos — API de sincronização (Netlify Functions + Netlify Blobs)
+// Cadernos API — VERSÃO 2 (com flashcards). Se você está vendo esta linha no GitHub, o arquivo certo foi colado.
 import { getStore } from "@netlify/blobs";
 
 const COLLS = ["notebooks", "sections", "pages", "tags", "disciplines"];
