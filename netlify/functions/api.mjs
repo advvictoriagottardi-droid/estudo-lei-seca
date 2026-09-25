@@ -1,7 +1,7 @@
-// Cadernos — API de sincronização (Netlify Functions + Netlify Blobs)
+// Cadernos API — VERSÃO 2 (com flashcards). Se você está vendo esta linha no GitHub, o arquivo certo foi colado.
 import { getStore } from "@netlify/blobs";
 
-const COLLS = ["notebooks", "sections", "pages", "tags"];
+const COLLS = ["notebooks", "sections", "pages", "tags", "disciplines"];
 const ID = /^[\w.~:@+-]{1,100}$/;
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -16,7 +16,12 @@ function safeEqual(a, b) {
   return r === 0;
 }
 
-const emptyMeta = () => ({ v: 0, notebooks: {}, sections: {}, pages: {}, tags: {} });
+const emptyMeta = () => ({ v: 0, notebooks: {}, sections: {}, pages: {}, tags: {}, disciplines: {} });
+async function readCards(store) {
+  const c = (await store.get("cards", { type: "json" })) || { v: 0, items: {} };
+  c.items = c.items || {};
+  return c;
+}
 async function readMeta(store) {
   const m = (await store.get("meta", { type: "json" })) || emptyMeta();
   COLLS.forEach((c) => (m[c] = m[c] || {}));
@@ -75,6 +80,45 @@ export default async (req) => {
           m.v = (old.v || 0) + 1;
           await store.setJSON("meta", m);
           return m;
+        })
+      );
+    }
+
+    if (path === "cards" && method === "GET") {
+      const c = await readCards(store);
+      const since = url.searchParams.get("v");
+      if (since !== null && Number(since) === c.v) return json({ v: c.v, same: true });
+      return json(c);
+    }
+
+    if (path === "cards" && method === "POST") {
+      const { ops } = await req.json();
+      if (!Array.isArray(ops)) return json({ error: "bad_request" }, 400);
+      return json(
+        await withLock(async () => {
+          const c = await readCards(store);
+          const prev = c.v || 0;
+          for (const o of ops) {
+            if (!o || !ID.test(String(o.id))) continue;
+            if (o.op === "set") c.items[o.id] = o.data || {};
+            else if (o.op === "update") { if (c.items[o.id]) c.items[o.id] = Object.assign({}, c.items[o.id], o.data || {}); }
+            else if (o.op === "del") delete c.items[o.id];
+          }
+          c.v = prev + 1;
+          await store.setJSON("cards", c);
+          return { v: c.v, prev };
+        })
+      );
+    }
+
+    if (path === "cards-replace" && method === "POST") {
+      const { items } = await req.json();
+      return json(
+        await withLock(async () => {
+          const old = await readCards(store);
+          const c = { v: (old.v || 0) + 1, items: items && typeof items === "object" ? items : {} };
+          await store.setJSON("cards", c);
+          return { v: c.v };
         })
       );
     }
